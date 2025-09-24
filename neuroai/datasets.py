@@ -4,6 +4,7 @@ import numpy as np
 from einops import rearrange
 from PIL import Image
 import numpy as np
+from .utils.seed import seed_everything
 
 
 # https://drive.google.com/file/d/17iuOTy_I-LhORK24C_KXw2OA43Q4acxW/view?usp=share_link
@@ -106,23 +107,40 @@ class NSDAllSubjectSingleRegion:
         region: str = "EBA",
         flatten=False,
         transforms: callable = None,
+        subset="train",
+        train_test_split=0.8,
     ):
         self.datasets = {}
+        seed_everything(0)
 
         self.stimuli = NSDStimuli(folder=folder)
+        self.flatten = flatten
+        self.transforms = transforms
+
+        # Determine split indices
+        total_len = len(self.stimuli)
+        indices = np.arange(total_len)
+        np.random.shuffle(indices)
+        split_idx = int(total_len * train_test_split)
+        if subset == "train":
+            self.selected_indices = indices[:split_idx]
+        elif subset == "test":
+            self.selected_indices = indices[split_idx:]
+        else:
+            raise ValueError(f"Unknown subset: {subset}")
+
         for subject_id in valid_subject_ids:
             self.datasets[subject_id] = NSDSingleSubjectSingleRegion(
                 folder=folder, subject_id=subject_id, region=region
             )
             assert self.stimuli.data.shape[0] == self.datasets[subject_id].data.shape[0]
-        self.flatten = flatten
-        self.transforms = transforms
 
-    def __getitem__(self, index: int):
+    def __getitem__(self, idx: int):
+        assert idx in range(
+            len(self.selected_indices)
+        ), f"Expected idx to be in range {len(self.selected_indices)} but got {idx}"
 
-        assert index in range(
-            len(self.stimuli)
-        ), f"Expected index to be in range {len(self.stimuli)} but got {index}"
+        index = self.selected_indices[idx]
 
         if not self.flatten:
             responses = {
@@ -143,4 +161,4 @@ class NSDAllSubjectSingleRegion:
         return {"image": image_tensor, "fmri_response": responses}
 
     def __len__(self):
-        return len(self.stimuli)
+        return len(self.selected_indices)
