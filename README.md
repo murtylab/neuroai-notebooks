@@ -1,6 +1,10 @@
 # neuroai-notebooks
 course material for the neuroAI course (PSYC-4690/6690)
 
+```bash
+pip install git+https://github.com/murtylab/neuroai-notebooks.git
+```
+
 ## Basics in Python
 
 | Notebook   | Link  |
