@@ -3,3 +3,5 @@ datasets/
 neuroai.egg-info/
 __pycache__/
 *.zip
+*.jpg
+*.png
