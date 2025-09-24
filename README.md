@@ -9,6 +9,13 @@ pip install git+https://github.com/murtylab/neuroai-notebooks.git
 
 | Notebook   | Link  |
 |------------|-------------------------------------------|
-| Demo       | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/basics/demo.ipynb) |
-| Assignment | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/basics/assignment.ipynb) |
+| Demo       | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day1_basics/demo.ipynb) |
+| Assignment | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day1_basics/assignment.ipynb) |
+
+## Building Encoding models
+
+| Notebook   | Link  |
+|------------|-------------------------------------------|
+| Training encoding models       | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/train_encoding_models.ipynb) |
+| Assignment | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/assignment.ipynb) |
 
