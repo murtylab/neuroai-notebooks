@@ -59,7 +59,7 @@ from PIL import Image
 from .hook import ForwardHook
 from sklearn.linear_model import Ridge
 
-class RidgeModel:
+class RidgeModel(nn.Module):
     def __init__(
         self,
         backbone_model: nn.Module,
@@ -68,6 +68,7 @@ class RidgeModel:
         ridge_result: RidgeResult,
         device: str = 'cpu',
     ):
+        super().__init__()
         self.backbone_model = backbone_model.to(device=device).eval()
         self.hook_layer_name = hook_layer_name
         self.ridge_weight = ridge_result.weight.to(device=device)
@@ -137,11 +138,8 @@ class RidgeModel:
     
         logits = self.forward_pass_on_ridge_params(features)
         return logits.cpu().tolist()
-
-    # def __repr__(self):
-    #     return (f"RidgeModel("
-    #             f"backbone_model={self.backbone_model.__class__.__name__}, "
-    #             f"hook_layer_name={self.hook_layer_name}, "
-    #             f"ridge_weight_shape={self.ridge_weight.shape}, "
-    #             f"ridge_bias={self.ridge_bias.item()}, "
-    #             f"device={self.device})")
+    
+    def forward(self, x):
+        logits = self.backbone_model(x)
+        features = self.hook.output
+        return self.forward_pass_on_ridge_params(features=features)
