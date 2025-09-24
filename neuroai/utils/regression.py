@@ -1,0 +1,161 @@
+import torch
+from dataclasses import dataclass
+
+@dataclass
+class RidgeResult:
+    weight: torch.Tensor
+    bias: float
+    mean: torch.Tensor | None
+
+    def __repr__(self):
+        return (f"RidgeResult(weight_shape={self.weight.shape}, "
+                f"bias={self.bias}, "
+                f"mean_shape={self.mean.shape if self.mean is not None else None})")
+
+def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu'):
+    """
+    Closed-form Ridge regression using PyTorch.
+
+    Args:
+        X_train (torch.Tensor): Training features, shape (N, D)
+        Y_train (torch.Tensor): Training targets, shape (N,)
+        lam (float): Regularization parameter (λ)
+        fit_intercept (bool): Whether to include an intercept term
+        device (str or torch.device): Device to use ('cpu' or 'cuda')
+
+    Returns:
+        dict with:
+            weight (torch.Tensor): Learned weights, shape (D,)
+            bias (float): Intercept term
+            X_mean (torch.Tensor or None): Training feature mean, shape (1, D), or None if no intercept
+    """
+    device = torch.device(device)
+    X_train = X_train.to(device)
+    Y_train = Y_train.to(device)
+
+    assert X_train.dim() == 2, f"X_train must be 2D (N, D), got {X_train.shape}"
+    assert Y_train.dim() == 1, f"Y_train must be 1D (N,), got {Y_train.shape}"
+    assert X_train.size(0) == Y_train.size(0), \
+        f"Mismatched samples: X_train {X_train.size(0)}, Y_train {Y_train.size(0)}"
+
+    N, D = X_train.shape
+
+    if fit_intercept:
+        # Center data
+        X_mean = X_train.mean(0, keepdim=True)
+        y_mean = Y_train.mean()
+
+        Xc = X_train - X_mean
+        yc = Y_train - y_mean
+
+        # Solve (XᵀX + λI)w = Xᵀy
+        XT = Xc.T
+        A = XT @ Xc + lam * torch.eye(D, device=device)
+        b_vec = XT @ yc
+        w = torch.linalg.solve(A, b_vec)
+
+        # Compute intercept
+        intercept = y_mean.item() - (X_mean @ w).item()
+
+    else:
+        X_mean = None
+        XT = X_train.T
+        A = XT @ X_train + lam * torch.eye(D, device=device)
+        b_vec = XT @ Y_train
+        w = torch.linalg.solve(A, b_vec)
+        intercept = 0.0
+
+    return RidgeResult(weight=w, bias=intercept, mean=X_mean)
+
+import torch
+import torch.nn as nn
+from einops import rearrange
+from PIL import Image
+from .hook import ForwardHook
+
+class RidgeModel:
+    def __init__(
+        self,
+        backbone_model: nn.Module,
+        transforms: callable,
+        hook_layer_name: str,
+        ridge_result: RidgeResult,
+        device: str = 'cpu',
+    ):
+        self.backbone_model = backbone_model.to(device=device).eval()
+        self.hook_layer_name = hook_layer_name
+        self.ridge_weight = ridge_result.weight.to(device=device)
+        self.ridge_bias = ridge_result.bias
+        self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
+        self.device = device
+        self.transforms = transforms
+
+        assert isinstance(self.backbone_model, nn.Module), \
+            f"backbone must be an nn.Module, but got {type(self.backbone_model)}"
+        assert callable(transforms), \
+            f"transforms must be callable, but got {type(transforms)}"
+        assert isinstance(self.hook_layer_name, str), \
+            f"hook_layer_name must be str, but got {type(self.hook_layer_name)}"
+        assert isinstance(self.ridge_weight, torch.Tensor), \
+            f"ridge_weight must be torch.Tensor, but got {type(self.ridge_weight)}"
+
+        self.hook = ForwardHook(
+            model=self.backbone_model,
+            hook_layer_name=self.hook_layer_name,
+        )
+
+    def forward_pass_on_ridge_params(self, features):
+        # Use training mean for centering (if available)
+        if self.feature_mean is not None:
+            features = features - self.feature_mean
+
+        # Apply ridge regression weights
+        logits = features @ self.ridge_weight + self.ridge_bias
+        return logits  # return tensor instead of list
+
+    def evaluate(self, x_test, y_test) -> float:
+        y_pred = self.forward_pass_on_ridge_params(
+            features=x_test.to(self.device)
+        )
+        correlation_matrix = torch.corrcoef(torch.stack((y_test.to(self.device), y_pred)))
+        correlation = correlation_matrix[0, 1].item()
+        return correlation
+    
+    
+
+    def run(self, images: list[Image.Image]) -> torch.Tensor:
+        assert isinstance(images, list), f"images must be a list, got {type(images)}"
+        assert all(isinstance(img, Image.Image) for img in images), \
+            f"all elements in images must be PIL images"
+
+        # ensure RGB
+        images = [img.convert("RGB") if img.mode != "RGB" else img for img in images]
+
+        # Preprocess
+        image_tensor = torch.stack([self.transforms(img) for img in images]).to(self.device)
+        assert image_tensor.ndim == 4, f"Expected (B, C, H, W), got {image_tensor.shape}"
+        assert image_tensor.size(1) == 3, f"Expected 3 channels, got {image_tensor.size(1)}"
+
+        # Forward pass
+        with torch.no_grad():
+            _ = self.backbone_model(image_tensor)
+            features = self.hook.output
+
+        assert features.ndim == 4, f"Expected features (B, C, H, W), got {features.shape}"
+
+        features = rearrange(features, 'b c h w -> b (c h w)')
+        assert features.ndim == 2, f"Expected (B, D), got {features.shape}"
+        assert features.size(1) == self.ridge_weight.size(0), \
+            f"Feature dim {features.size(1)} ≠ ridge weight dim {self.ridge_weight.size(0)}"
+
+    
+        logits = self.forward_pass_on_ridge_params(features)
+        return logits
+
+    # def __repr__(self):
+    #     return (f"RidgeModel("
+    #             f"backbone_model={self.backbone_model.__class__.__name__}, "
+    #             f"hook_layer_name={self.hook_layer_name}, "
+    #             f"ridge_weight_shape={self.ridge_weight.shape}, "
+    #             f"ridge_bias={self.ridge_bias.item()}, "
+    #             f"device={self.device})")
