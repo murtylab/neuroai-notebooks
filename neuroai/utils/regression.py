@@ -40,30 +40,15 @@ def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu
 
     N, D = X_train.shape
 
-    if fit_intercept:
-        # Center data
-        X_mean = X_train.mean(0, keepdim=True)
-        y_mean = Y_train.mean()
+    X_np = X_train.cpu().numpy()
+    Y_np = Y_train.cpu().numpy()
 
-        Xc = X_train - X_mean
-        yc = Y_train - y_mean
+    model = Ridge(alpha=lam, fit_intercept=fit_intercept, solver='auto')
+    model.fit(X_np, Y_np)
 
-        # Solve (XᵀX + λI)w = Xᵀy
-        XT = Xc.T
-        A = XT @ Xc + lam * torch.eye(D, device=device)
-        b_vec = XT @ yc
-        w = torch.linalg.solve(A, b_vec)
-
-        # Compute intercept
-        intercept = y_mean.item() - (X_mean @ w).item()
-
-    else:
-        X_mean = None
-        XT = X_train.T
-        A = XT @ X_train + lam * torch.eye(D, device=device)
-        b_vec = XT @ Y_train
-        w = torch.linalg.solve(A, b_vec)
-        intercept = 0.0
+    w = torch.from_numpy(model.coef_).to(device).float()
+    intercept = float(model.intercept_)
+    X_mean = torch.from_numpy(X_np.mean(0, keepdims=True)).to(device).float() if fit_intercept else None
 
     return RidgeResult(weight=w, bias=intercept, mean=X_mean)
 
@@ -72,6 +57,7 @@ import torch.nn as nn
 from einops import rearrange
 from PIL import Image
 from .hook import ForwardHook
+from sklearn.linear_model import Ridge
 
 class RidgeModel:
     def __init__(
@@ -150,7 +136,7 @@ class RidgeModel:
 
     
         logits = self.forward_pass_on_ridge_params(features)
-        return logits
+        return logits.cpu().tolist()
 
     # def __repr__(self):
     #     return (f"RidgeModel("
