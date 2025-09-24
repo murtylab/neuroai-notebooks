@@ -5,3 +5,4 @@ __pycache__/
 *.zip
 *.jpg
 *.png
+pretrained_checkpoints/
