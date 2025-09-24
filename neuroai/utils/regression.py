@@ -59,6 +59,30 @@ from PIL import Image
 from .hook import ForwardHook
 from sklearn.linear_model import Ridge
 
+class RidgeModule(nn.Module):
+    def __init__(
+        self,
+        ridge_result: RidgeResult,
+        device: str = 'cpu',
+    ):
+        super().__init__()
+        self.ridge_weight = ridge_result.weight.to(device=device)
+        self.ridge_bias = ridge_result.bias
+        self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
+        self.device = device
+
+        assert isinstance(self.ridge_weight, torch.Tensor), \
+            f"ridge_weight must be torch.Tensor, but got {type(self.ridge_weight)}"
+        
+    def forward(self, x):
+        # Use training mean for centering (if available)
+        if self.feature_mean is not None:
+            x = x - self.feature_mean
+
+        # Apply ridge regression weights
+        logits = x @ self.ridge_weight + self.ridge_bias
+        return logits
+
 class RidgeModel(nn.Module):
     def __init__(
         self,
@@ -69,36 +93,31 @@ class RidgeModel(nn.Module):
         device: str = 'cpu',
     ):
         super().__init__()
-        self.backbone_model = backbone_model.to(device=device).eval()
-        self.hook_layer_name = hook_layer_name
-        self.ridge_weight = ridge_result.weight.to(device=device)
-        self.ridge_bias = ridge_result.bias
-        self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
-        self.device = device
-        self.transforms = transforms
 
-        assert isinstance(self.backbone_model, nn.Module), \
+        assert isinstance(backbone_model, nn.Module), \
             f"backbone must be an nn.Module, but got {type(self.backbone_model)}"
         assert callable(transforms), \
             f"transforms must be callable, but got {type(transforms)}"
-        assert isinstance(self.hook_layer_name, str), \
+        assert isinstance(hook_layer_name, str), \
             f"hook_layer_name must be str, but got {type(self.hook_layer_name)}"
-        assert isinstance(self.ridge_weight, torch.Tensor), \
-            f"ridge_weight must be torch.Tensor, but got {type(self.ridge_weight)}"
+        assert isinstance(ridge_result, RidgeResult), \
+            f"ridge_result must be RidgeResult, but got {type(ridge_result)}"
 
+
+        self.backbone_model = backbone_model.to(device=device).eval()
+        self.hook_layer_name = hook_layer_name
+        self.ridge_module = RidgeModule(ridge_result, device=device)
+        self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
+        self.device = device
+        self.transforms = transforms
+        
         self.hook = ForwardHook(
             model=self.backbone_model,
             hook_layer_name=self.hook_layer_name,
         )
 
     def forward_pass_on_ridge_params(self, features):
-        # Use training mean for centering (if available)
-        if self.feature_mean is not None:
-            features = features - self.feature_mean
-
-        # Apply ridge regression weights
-        logits = features @ self.ridge_weight + self.ridge_bias
-        return logits  # return tensor instead of list
+        return self.ridge_module(features)
 
     def evaluate(self, x_test, y_test) -> float:
         y_pred = self.forward_pass_on_ridge_params(
@@ -132,8 +151,6 @@ class RidgeModel(nn.Module):
 
         features = rearrange(features, 'b c h w -> b (c h w)')
         assert features.ndim == 2, f"Expected (B, D), got {features.shape}"
-        assert features.size(1) == self.ridge_weight.size(0), \
-            f"Feature dim {features.size(1)} ≠ ridge weight dim {self.ridge_weight.size(0)}"
 
     
         logits = self.forward_pass_on_ridge_params(features)
