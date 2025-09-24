@@ -1,1 +1,4 @@
 .ipynb_checkpoints/
+datasets/
+neuroai.egg-info/
+__pycache__/
