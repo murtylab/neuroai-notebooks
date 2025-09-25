@@ -16,6 +16,7 @@ pip install git+https://github.com/murtylab/neuroai-notebooks.git
 
 | Notebook   | Link  |
 |------------|-------------------------------------------|
-| Training encoding models       | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/train_encoding_models.ipynb) |
+| Exploring the NSD Dataset | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/assignment.ipynb) |
+| Training encoding models       | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/exploring_nsd.ipynb) |
 | Assignment | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/murtylab/neuroai-notebooks/blob/main/notebooks/day2/assignment.ipynb) |
 
