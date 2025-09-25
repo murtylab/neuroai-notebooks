@@ -18,23 +18,23 @@ def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu
 
     Args:
         X_train (torch.Tensor): Training features, shape (N, D)
-        Y_train (torch.Tensor): Training targets, shape (N,)
+        Y_train (torch.Tensor): Training targets, shape (N,) or (N, M)
         lam (float): Regularization parameter (λ)
         fit_intercept (bool): Whether to include an intercept term
         device (str or torch.device): Device to use ('cpu' or 'cuda')
 
     Returns:
-        dict with:
-            weight (torch.Tensor): Learned weights, shape (D,)
-            bias (float): Intercept term
-            X_mean (torch.Tensor or None): Training feature mean, shape (1, D), or None if no intercept
+        RidgeResult:
+            weight (torch.Tensor): Learned weights, shape (D,) or (D, M)
+            bias (float or torch.Tensor): Intercept term(s)
+            mean (torch.Tensor or None): Training feature mean, shape (1, D), or None if no intercept
     """
     device = torch.device(device)
     X_train = X_train.to(device)
     Y_train = Y_train.to(device)
 
     assert X_train.dim() == 2, f"X_train must be 2D (N, D), got {X_train.shape}"
-    assert Y_train.dim() == 1, f"Y_train must be 1D (N,), got {Y_train.shape}"
+    assert Y_train.dim() in (1, 2), f"Y_train must be 1D or 2D, got {Y_train.shape}"
     assert X_train.size(0) == Y_train.size(0), \
         f"Mismatched samples: X_train {X_train.size(0)}, Y_train {Y_train.size(0)}"
 
@@ -47,7 +47,16 @@ def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu
     model.fit(X_np, Y_np)
 
     w = torch.from_numpy(model.coef_).to(device).float()
-    intercept = float(model.intercept_)
+    # model.coef_ shape: (D,) for 1D target, (M, D) for multi-target (scikit-learn returns (M, D))
+    # We want (D,) or (D, M)
+    if w.ndim == 2:
+        w = w.T  # (M, D) -> (D, M)
+    intercept = model.intercept_
+    if isinstance(intercept, float) or isinstance(intercept, int):
+        intercept = float(intercept)
+    else:
+        intercept = torch.tensor(intercept).to(device).float()  # shape (M,)
+
     X_mean = torch.from_numpy(X_np.mean(0, keepdims=True)).to(device).float() if fit_intercept else None
 
     return RidgeResult(weight=w, bias=intercept, mean=X_mean)
