@@ -76,10 +76,12 @@ class RidgeModule(nn.Module):
         
     def forward(self, x):
         # Use training mean for centering (if available)
+        assert x.ndim == 2, f"Expected a 2d tensor of shape (Batch, (channels x height x width)) but got: {x.shape}"
         if self.feature_mean is not None:
             x = x - self.feature_mean
 
         # Apply ridge regression weights
+        
         logits = x @ self.ridge_weight + self.ridge_bias
         return logits
 
@@ -159,4 +161,5 @@ class RidgeModel(nn.Module):
     def forward(self, x):
         logits = self.backbone_model(x)
         features = self.hook.output
+        features = rearrange(features, 'b c h w -> b (c h w)')
         return self.forward_pass_on_ridge_params(features=features)
