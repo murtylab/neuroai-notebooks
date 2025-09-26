@@ -1,5 +1,7 @@
 import torch
 from dataclasses import dataclass
+from einops import reduce
+import numpy as np
 
 @dataclass
 class RidgeResult:
@@ -9,44 +11,42 @@ class RidgeResult:
 
     def __repr__(self):
         return (f"RidgeResult(weight_shape={self.weight.shape}, "
-                f"bias={self.bias}, "
+                f"bias.shape={self.bias.shape}, "
                 f"mean_shape={self.mean.shape if self.mean is not None else None})")
 
-def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu'):
-    """
-    Closed-form Ridge regression using PyTorch.
+def ridge_regression(
+    x_train: torch.tensor, 
+    y_train: torch.tensor,
+    predict_mean: bool=False,
+    flatten_x: bool=True,
+    lam=1e-3, 
+    fit_intercept=True
+):
+    if flatten_x:
+        x_train = x_train.reshape(x_train.shape[0], -1)  # (B, D)
 
-    Args:
-        X_train (torch.Tensor): Training features, shape (N, D)
-        Y_train (torch.Tensor): Training targets, shape (N,) or (N, M)
-        lam (float): Regularization parameter (λ)
-        fit_intercept (bool): Whether to include an intercept term
-        device (str or torch.device): Device to use ('cpu' or 'cuda')
+    assert x_train.ndim == 2, f"x_train must be 2D, got {x_train.ndim}D"
+    assert y_train.ndim == 2, f"y_train must be 2D, got {y_train.ndim}D"
+    assert x_train.shape[0] == y_train.shape[0], \
+        f"Number of samples must match, got X: {x_train.shape[0]} and Y: {y_train.shape[0]}"
+    
+    if predict_mean:
+        y_train = reduce(
+            y_train,
+            "batch voxels -> batch",
+            reduction="mean"
+        ).unsqueeze(-1)  # (B, 1)
+        
 
-    Returns:
-        RidgeResult:
-            weight (torch.Tensor): Learned weights, shape (D,) or (D, M)
-            bias (float or torch.Tensor): Intercept term(s)
-            mean (torch.Tensor or None): Training feature mean, shape (1, D), or None if no intercept
-    """
-    device = torch.device(device)
-    X_train = X_train.to(device)
-    Y_train = Y_train.to(device)
+    N, D = x_train.shape
 
-    assert X_train.dim() == 2, f"X_train must be 2D (N, D), got {X_train.shape}"
-    assert Y_train.dim() in (1, 2), f"Y_train must be 1D or 2D, got {Y_train.shape}"
-    assert X_train.size(0) == Y_train.size(0), \
-        f"Mismatched samples: X_train {X_train.size(0)}, Y_train {Y_train.size(0)}"
-
-    N, D = X_train.shape
-
-    X_np = X_train.cpu().numpy()
-    Y_np = Y_train.cpu().numpy()
+    X_np = x_train.cpu().numpy()
+    Y_np = y_train.cpu().numpy()
 
     model = Ridge(alpha=lam, fit_intercept=fit_intercept, solver='auto')
     model.fit(X_np, Y_np)
 
-    w = torch.from_numpy(model.coef_).to(device).float()
+    w = torch.from_numpy(model.coef_)
     # model.coef_ shape: (D,) for 1D target, (M, D) for multi-target (scikit-learn returns (M, D))
     # We want (D,) or (D, M)
     if w.ndim == 2:
@@ -55,9 +55,9 @@ def ridge_regression(X_train, Y_train, lam=1e-3, fit_intercept=True, device='cpu
     if isinstance(intercept, float) or isinstance(intercept, int):
         intercept = float(intercept)
     else:
-        intercept = torch.tensor(intercept).to(device).float()  # shape (M,)
+        intercept = torch.tensor(intercept)
 
-    X_mean = torch.from_numpy(X_np.mean(0, keepdims=True)).to(device).float() if fit_intercept else None
+    X_mean = torch.from_numpy(X_np.mean(0, keepdims=True))if fit_intercept else None
 
     return RidgeResult(weight=w, bias=intercept, mean=X_mean)
 
@@ -72,26 +72,24 @@ class RidgeModule(nn.Module):
     def __init__(
         self,
         ridge_result: RidgeResult,
-        device: str = 'cpu',
     ):
         super().__init__()
-        self.ridge_weight = ridge_result.weight.to(device=device)
+        self.ridge_weight = ridge_result.weight
         self.ridge_bias = ridge_result.bias
-        self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
-        self.device = device
+        self.feature_mean = ridge_result.mean if ridge_result.mean is not None else None
 
         assert isinstance(self.ridge_weight, torch.Tensor), \
             f"ridge_weight must be torch.Tensor, but got {type(self.ridge_weight)}"
         
     def forward(self, x):
         # Use training mean for centering (if available)
-        assert x.ndim == 2, f"Expected a 2d tensor of shape (Batch, (channels x height x width)) but got: {x.shape}"
+        assert x.ndim == 2, f"Expected a 2d tensor of shape (batch, *) but got: {x.shape}"
         if self.feature_mean is not None:
             x = x - self.feature_mean
 
         # Apply ridge regression weights
         
-        logits = x @ self.ridge_weight + self.ridge_bias
+        logits = x.to(self.ridge_weight.device) @ self.ridge_weight + self.ridge_bias
         return logits
 
 class RidgeModel(nn.Module):
@@ -117,7 +115,7 @@ class RidgeModel(nn.Module):
 
         self.backbone_model = backbone_model.to(device=device).eval()
         self.hook_layer_name = hook_layer_name
-        self.ridge_module = RidgeModule(ridge_result, device=device)
+        self.ridge_module = RidgeModule(ridge_result).to(device=device).eval()
         self.feature_mean = ridge_result.mean.to(device=device) if ridge_result.mean is not None else None
         self.device = device
         self.transforms = transforms
@@ -130,11 +128,36 @@ class RidgeModel(nn.Module):
     def forward_pass_on_ridge_params(self, features):
         return self.ridge_module(features)
 
-    def evaluate(self, x_test, y_test) -> float:
+    def evaluate(self, x_test, y_test, predict_mean: bool = False, flatten_x: bool =True) -> float:
+
+        if flatten_x:
+            x_test = x_test.reshape(x_test.shape[0], -1)
+
         y_pred = self.forward_pass_on_ridge_params(
             features=x_test.to(self.device)
         )
-        correlation_matrix = torch.corrcoef(torch.stack((y_test.to(self.device), y_pred)))
+
+        if predict_mean:
+            y_test = reduce(
+                y_test,
+                "batch voxels -> batch",
+                reduction="mean"
+            ).unsqueeze(-1)
+            y_pred = reduce(
+                y_pred,
+                "batch voxels -> batch",
+                reduction="mean"
+            ).unsqueeze(-1)
+
+        assert y_pred.shape == y_test.shape, \
+            f"y_pred and y_test must have the same shape, got y_pred: {y_pred.shape} and y_test {y_test.shape}\n(perhaps you're training a model with multiple voxels and trying to test it on another subject? who has a different number of voxels?)"
+        
+        
+
+        correlation_matrix = np.corrcoef(
+            y_pred.cpu().numpy().flatten(),
+            y_test.cpu().numpy().flatten()
+        )
         correlation = correlation_matrix[0, 1].item()
         return correlation
     
