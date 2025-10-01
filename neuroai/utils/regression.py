@@ -82,6 +82,7 @@ class RidgeModule(nn.Module):
             f"ridge_weight must be torch.Tensor, but got {type(self.ridge_weight)}"
         
     def forward(self, x):
+        x = x.to(self.ridge_weight.device)
         # Use training mean for centering (if available)
         assert x.ndim == 2, f"Expected a 2d tensor of shape (batch, *) but got: {x.shape}"
         if self.feature_mean is not None:
