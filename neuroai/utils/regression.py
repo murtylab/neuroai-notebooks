@@ -178,7 +178,7 @@ class RidgeModel(nn.Module):
 
         # Forward pass
         with torch.no_grad():
-            _ = self.backbone_model(image_tensor)
+            _ = self.backbone_model(image_tensor.to(self.device))
             features = self.hook.output
 
         assert features.ndim == 4, f"Expected features (B, C, H, W), got {features.shape}"
